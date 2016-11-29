@@ -1,6 +1,6 @@
 [submodule "on-http"]
 	path = on-http
-	url = https://github.com/RackHD/on-http.git
+	url = https://github.com/tgelter/on-http.git
 [submodule "on-tftp"]
 	path = on-tftp
 	url = https://github.com/RackHD/on-tftp.git
@@ -9,7 +9,7 @@
 	url = https://github.com/RackHD/on-dhcp-proxy.git
 [submodule "on-taskgraph"]
 	path = on-taskgraph
-	url = https://github.com/RackHD/on-taskgraph.git
+	url = https://github.com/tgelter/on-taskgraph.git
 [submodule "on-statsd"]
 	path = on-statsd
 	url = https://github.com/RackHD/on-statsd.git
@@ -18,16 +18,16 @@
 	url = https://github.com/RackHD/on-syslog.git
 [submodule "on-core"]
 	path = on-core
-	url = https://github.com/RackHD/on-core.git
+	url = https://github.com/tgelter/on-core.git
 [submodule "on-tasks"]
 	path = on-tasks
-	url = https://github.com/RackHD/on-tasks.git
+	url = https://github.com/tgelter/on-tasks.git
 [submodule "on-imagebuilder"]
 	path = on-imagebuilder
 	url = https://github.com/RackHD/on-imagebuilder.git
 [submodule "on-tools"]
 	path = on-tools
-	url = https://github.com/RackHD/on-tools
+	url = https://github.com/RackHD/on-tools.git
 [submodule "on-wss"]
 	path = on-wss
-	url = https://github.com/RackHD/on-wss
+	url = https://github.com/RackHD/on-wss.git
