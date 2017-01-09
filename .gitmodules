@@ -9,7 +9,7 @@
 	url = https://github.com/RackHD/on-dhcp-proxy.git
 [submodule "on-taskgraph"]
 	path = on-taskgraph
-	url = https://github.com/tgelter/on-taskgraph.git
+	url = https://github.com/RackHD/on-taskgraph.git
 [submodule "on-statsd"]
 	path = on-statsd
 	url = https://github.com/RackHD/on-statsd.git
