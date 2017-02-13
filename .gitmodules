@@ -21,7 +21,7 @@
 	url = https://github.com/RackHD/on-core.git
 [submodule "on-tasks"]
 	path = on-tasks
-	url = https://github.com/tgelter/on-tasks.git
+	url = https://github.com/RackHD/on-tasks.git
 [submodule "on-imagebuilder"]
 	path = on-imagebuilder
 	url = https://github.com/RackHD/on-imagebuilder.git
