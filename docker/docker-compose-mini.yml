@@ -30,8 +30,8 @@ services:
 #      - "./dhcp/defaults:/etc/defaults"
 
   files:
-    build: "../on-imagebuilder"
-    image: rackhd/files
+    build: "./files"
+    image: "rackhd/files"
     network_mode: "host"
     privileged: true
     volumes:
