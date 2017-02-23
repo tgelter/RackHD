@@ -1,0 +1,8 @@
+[flake8]
+
+max-line-length = 128
+
+include = .
+exclude = .venv
+
+ignore = E402

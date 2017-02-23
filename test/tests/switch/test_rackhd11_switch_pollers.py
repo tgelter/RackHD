@@ -6,12 +6,11 @@ Author(s):
 FIT test script template
 '''
 
+import fit_path  # NOQA: unused import
 import sys
 import subprocess
 import pprint
 
-# set path to common libraries
-sys.path.append(subprocess.check_output("git rev-parse --show-toplevel", shell=True).rstrip("\n") + "/test/common")
 import fit_common
 import test_api_utils
 
@@ -27,7 +26,7 @@ def get_switches():
 
     # check if user specified a single nodeid to run against
     # user must know the nodeid and any check for a valid nodeid is skipped
-    nodeid = fit_common.ARGS_LIST['nodeid']
+    nodeid = fit_common.fitargs()['nodeid']
     if nodeid != 'None':
         nodelist.append(nodeid)
     else:

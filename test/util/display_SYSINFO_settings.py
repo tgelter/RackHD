@@ -5,12 +5,11 @@
   This script will generate a list of discovered nodes and display the system information for the nodes 
 """
 
+import fit_path  # NOQA: unused import
 import os
 import sys
 import subprocess
 
-# set path to common libraries
-sys.path.append(subprocess.check_output("git rev-parse --show-toplevel", shell=True).rstrip("\n") + "/test/common")
 import fit_common
 import test_api_utils
 
@@ -18,9 +17,9 @@ import test_api_utils
 class display_sysinfo(fit_common.unittest.TestCase):
     def test_01_get_product_info(self):
         print "============== Displaying Product Info"
-        nodes = test_api_utils.monorail_get_node_list(fit_common.ARGS_LIST['ora'])
+        nodes = test_api_utils.monorail_get_node_list(fit_common.fitargs()['ora'])
         if len(nodes) == 0:
-            print "No Nodes found on Onrack server "+fit_common.ARGS_LIST['ora']
+            print "No Nodes found on Onrack server "+ fit_common.fitargs()['ora']
         else:
             inode=0
             while inode<len(nodes):
@@ -43,9 +42,9 @@ class display_sysinfo(fit_common.unittest.TestCase):
 
     def test_02_get_catalog_source(self):
         print "============== Displaying Catalog Sources"
-        nodes = test_api_utils.monorail_get_node_list(fit_common.ARGS_LIST['ora'])
+        nodes = test_api_utils.monorail_get_node_list(fit_common.fitargs()['ora'])
         if len(nodes) == 0:
-            print "No Nodes found on Onrack server "+fit_common.ARGS_LIST['ora']
+            print "No Nodes found on Onrack server "+ fit_common.fitargs()['ora']
         else:
             inode=0
             while inode<len(nodes):
