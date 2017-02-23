@@ -27,7 +27,7 @@
 	url = https://github.com/RackHD/on-imagebuilder.git
 [submodule "on-tools"]
 	path = on-tools
-	url = https://github.com/RackHD/on-tools.git
+	url = https://github.com/RackHD/on-tools
 [submodule "on-wss"]
 	path = on-wss
-	url = https://github.com/RackHD/on-wss.git
+	url = https://github.com/RackHD/on-wss
