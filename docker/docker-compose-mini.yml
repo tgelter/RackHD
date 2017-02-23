@@ -19,15 +19,15 @@ services:
       - "./rabbitmq/mnesia:/data/mnesia"
       - "./rabbitmq/log:/data/log"
 
-#  dhcp: # 67/udp
-#    image: rackhd/isc-dhcp-server
-#    build: "./dhcp"
-#    network_mode: "host"
-#    privileged: true
-#    volumes:
-#      - "./dhcp/libdhcp:/var/lib/dhcp"
-#      - "./dhcp/config:/etc/dhcp"
-#      - "./dhcp/defaults:/etc/defaults"
+  dhcp: # 67/udp
+    image: rackhd/isc-dhcp-server
+    build: "./dhcp"
+    network_mode: "host"
+    privileged: true
+    volumes:
+      - "./dhcp/libdhcp:/var/lib/dhcp"
+      - "./dhcp/config:/etc/dhcp"
+      - "./dhcp/defaults:/etc/defaults"
 
   files:
     build: "./files"
@@ -53,7 +53,7 @@ services:
   dhcp-proxy: # 68/udp, 4011
     build: "../on-dhcp-proxy"
     depends_on:
-#      - dhcp
+      - dhcp
       - mongo
       - rabbitmq
     image: rackhd/on-dhcp-proxy:latest
@@ -91,7 +91,7 @@ services:
   taskgraph:
     build: "../on-taskgraph"
     depends_on:
-#      - dhcp
+      - dhcp
       - mongo
       - rabbitmq
       - syslog
