@@ -12,8 +12,7 @@ services:
       - "./mongo/db:/data/db"
 
   files:
-    build: "./files"
-    image: "rackhd/files"
+    image: rackhd/files:${TAG}
     network_mode: "host"
     privileged: true
     volumes:
@@ -25,7 +24,7 @@ services:
     build: "../on-dhcp-proxy"
     depends_on:
       - mongo
-    image: rackhd/on-dhcp-proxy:latest
+    image: rackhd/on-dhcp-proxy:${TAG}
     network_mode: "host"
     privileged: true
     volumes:
@@ -37,7 +36,7 @@ services:
     depends_on:
       - files
       - mongo
-    image: rackhd/on-http:latest
+    image: rackhd/on-http:${TAG}
     network_mode: "host"
     privileged: true
     volumes:
@@ -48,7 +47,7 @@ services:
     build: "../on-syslog"
     depends_on:
       - mongo
-    image: rackhd/on-syslog:latest
+    image: rackhd/on-syslog:${TAG}
     network_mode: "host"
     privileged: true
     volumes:
@@ -59,7 +58,7 @@ services:
     depends_on:
       - mongo
       - syslog
-    image: rackhd/on-taskgraph:latest
+    image: rackhd/on-taskgraph:${TAG}
     network_mode: "host"
     privileged: true
     volumes:
@@ -72,7 +71,7 @@ services:
       - files
       - mongo
       - syslog
-    image: rackhd/on-tftp:latest
+    image: rackhd/on-tftp:${TAG}
     network_mode: "host"
     privileged: true
     volumes:
