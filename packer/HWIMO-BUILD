@@ -11,11 +11,17 @@
 # * ATLAS_NAME     - optional, required only when UPLOAD_BOX_TO_ATLAS is true.
 # * ATLAS_TOKEN    - optional, required only when UPLOAD_BOX_TO_ATLAS is true.
 # * ATLAS_VERSION  - optional, by default is "".when UPLOAD_BOX_TO_ATLAS is true, the box will be uploaded to ATLAS as ATLAS_VERSION( format only accepts like 1.2.3).
+# * CUSTOMIZED_PROPERTY_OVA - optional, by default false, only effective when BUILD_TYPE is vmware.. 
+#                           - if true, the OVA can be specified IP during deployment. only supported by vCenter
+# * BUILD_STAGE     - optional, by default is BUILD_ALL. other options as below:
+#                   - "BUILD_TEMPLATE" (a prebuild cache, vmx or ovf),
+#                   - "BUILD_FINAL"( Build ova or box from the template) , or "BUILD_ALL"(including both steps).
 ###################################################
 
 INFO_HEADER="[Info]"
 WARNING_HEADER="[Warning]"
 ERROR_HEADER="[Error]"
+
 
 # early exit on command failure
 set -e
@@ -70,7 +76,6 @@ fi
 
 
 # By default. use ansible playbook : rackhd_local.yml
-# can become an ENV VAR in the future
 if  [ ! -n "${ANSIBLE_PLAYBOOK}" ];  then
     ANSIBLE_PLAYBOOK=rackhd_local
 fi
@@ -78,7 +83,27 @@ if [ ! -f "ansible/${ANSIBLE_PLAYBOOK}.yml" ]; then
     echo "${ERROR_HEADER} The target ansible playbook(ansible/${ANSIBLE_PLAYBOOK}.yml) does not exist. Aborting..."
     exit 3
 fi
-echo "${INFO_HEADER} Install RackHD with ansible :  ${ANSIBLE_PLAYBOOK}.yml "
+
+### For OVA Build, option is to build OVA directlly from VMX, or build a VMX (which includes all RackHD Prerequisite)
+if  [ ! -n "${BUILD_STAGE}" ];  then
+    BUILD_STAGE="BUILD_ALL"
+fi
+
+if [ "$BUILD_STAGE" == "BUILD_ALL" ] ; then
+    echo "${INFO_HEADER} Full Build:  Install RackHD with (1) ansible playbook rackhd_prepare.yml, (2) ansible playbook ${ANSIBLE_PLAYBOOK}_mini.yml "
+else
+    if [ "$BUILD_STAGE" == "BUILD_FINAL" ] ; then
+        echo "${INFO_HEADER} Second Half Build: Install RackHD with ansible :  ${ANSIBLE_PLAYBOOK}_mini.yml "
+    else
+        if [ "$BUILD_STAGE" == "BUILD_TEMPLATE" ] ; then
+            echo "${INFO_HEADER} First Half Build: Prepare RackHD dependency with ansible :  rackhd_prepare.yml "
+        else
+            echo "${ERROR_HEADER} Unrecongnized parameter BUILD_STAGE=$BUILD_STAGE,  Abort ! "
+            exit 2
+        fi
+    fi
+fi
+
 
 ### $RACKHD_VERSION is used for package install provisioner:  `apt-get install rackhd=$RACKHD_VERSION` ###
 
@@ -94,6 +119,26 @@ else
    fi
 fi
 
+
+# By default. disable CUSTOMIZED_PROPERTY_OVA, because only supported by vCenter. not by vSphere
+if  [ ! -n "${CUSTOMIZED_PROPERTY_OVA}" ];  then
+    CUSTOMIZED_PROPERTY_OVA=false;
+fi
+
+if [ "$BUILD_TYPE"  == "vmware" ]
+then
+    if [ "${CUSTOMIZED_PROPERTY_OVA}" == "true" ];
+    then
+         echo "${INFO_HEADER} the OVA created will carry with customized property, like admin port IP "
+    else
+         echo "${INFO_HEADER} the OVA created will not carry with customized property."
+    fi
+fi
+
+
+
+
+
 ############################  Parameter Process ################ end #############
 
 # Enable Verbose Packer Logging
@@ -106,7 +151,12 @@ export PACKER_NO_COLOR=1  # for Jenkins usage. if manual run, suggest to turn co
 
 
 # default is output-${type}. you can customized in packer's json by "output_directory" param
-VMDIR=output-${BUILD_TYPE}-iso
+if [ "$BUILD_TYPE"  == "vmware" ]; then
+     VMDIR=output-${BUILD_TYPE}-vmx # output of Build VMWare from VMX
+else
+     VMDIR=output-${BUILD_TYPE}-ovf # output of Build VirtualBox from OVF
+fi
+
 
 VM_NAME=rackhd-${OS_VER}
 
@@ -136,12 +186,6 @@ then
     PACKER=/opt/packer/packer
 fi
 
-if [ -x /usr/local/bin/ts ]
-then
-    TS=/usr/local/bin/ts
-else
-    TS=cat
-fi
 
 
 # Check Free Disk Space,  VMWare Workstation may stuck if disk space too small
@@ -156,29 +200,69 @@ if [ "$BUILD_TYPE"  == "vmware" ];  then
 fi
 
 # pre-process the packer template file
-PACKER_TEMP=$(cat template-${OS_VER}.json)
-if [[ $IS_UPLOAD_ATLAS == false ]]
+PACKER_TEMP=template-${OS_VER}.json.tmp
+TMP_FILE_STREAM=$(cat template-${OS_VER}.json)
+if [[ $IS_UPLOAD_ATLAS == false ]] && [[ "$BUILD_TYPE"  != "vmware" ]]
 then
     if [ ! -n "$(which jq)" ] ; then
         echo "${ERROR_HEADER} jq is not installed . please install it, e.x. sudo apt-get install jq... Aborting. "
         exit 5
     fi
     # Delete the post-processors blocks in the template.json, before sending to 'packer build'
-#    PACKER_TEMP=$( jq 'del(."post-processors")'  template-${OS_VER}.json)
-     PACKER_TEMP=$( jq 'del(.["post-processors"][0][1])' template-${OS_VER}.json | jq 'del(.["push"])')
+#    TMP_FILE_STREAM=$( jq 'del(."post-processors")'  template-${OS_VER}.json)
+     TMP_FILE_STREAM=$( jq 'del(.["post-processors"][0][1])' template-${OS_VER}.json | jq 'del(.["push"])')
+
+     echo "[Info] the template-${OS_VER}.json has been cutomized , to remove the vagrant-upload step"
+     # Write back the template file
+fi
+echo "$TMP_FILE_STREAM" > $PACKER_TEMP
+
+# indictor of packer build type for vmware
+if [ "$BUILD_TYPE"  == "vmware" ];  then
+      temp_src_format=vmx
+else
+      temp_src_format=ovf
 fi
 
 
 # execute 'packer build'
-echo ${PACKER_TEMP} | $PACKER build --force --only=${BUILD_TYPE}-iso --var-file=$CFG_FILE  - | $TS | tee packer-install.log 
+if [ "$BUILD_STAGE" == "BUILD_TEMPLATE" ]; then
+    #Build from  iso, create a Pre-build Cache ( vmware:iso-->vmx, virtualbox: iso-->ovf )
+    $PACKER build --force --only=${BUILD_TYPE}-iso  --var-file=$CFG_FILE  ${PACKER_TEMP}  | tee packer-install.log
+else
 
-if [ $? != 0 ]; then
+    if [ "$BUILD_STAGE" == "BUILD_FINAL" ]; then
+         #Build from cache template, and output the final image .(vmware: vmx-->ova, virtualbox: ovf-->box)
+         $PACKER build --force --only=${BUILD_TYPE}-${temp_src_format}  --var-file=$CFG_FILE  --var "playbook=${ANSIBLE_PLAYBOOK}_mini" ${PACKER_TEMP}   | tee packer-install.log
+
+    else
+         #Build from scratch, vmware: iso-->vmx-->ova, virtualbox: iso-->ovf-->box
+         $PACKER build --force --only=${BUILD_TYPE}-iso  --var-file=$CFG_FILE  ${PACKER_TEMP}  | tee packer-install.log && \
+         $PACKER build --force --only=${BUILD_TYPE}-${temp_src_format}  --var-file=$CFG_FILE  --var "playbook=${ANSIBLE_PLAYBOOK}_mini" ${PACKER_TEMP}   | tee packer-install.log
+    fi
+fi
+
+## Check packer build command status, because above we use pipeline, so use  ${PIPESTATUS[0]} to catch return-code of command before pipeline.(only works on bash)
+if [ ${PIPESTATUS[0]} != 0 ]; then
     echo "${ERROR_HEADER} Packer Build failed.. exit"
     exit 3
 fi
 
-if [ "$BUILD_TYPE"  != "vmware" ];  then
+if  [ "$BUILD_STAGE" == "BUILD_TEMPLATE" ]; then
+     if [ "$BUILD_TYPE"  == "vmware" ];  then
+        echo "{INFO_HEADER} Build VMX is successful... Exit the HWIMO-BUILD Script. Use BUILD_STAGE=BUILD_FINAL and ANSIBLE_PLAYBOOK=rackhd_mini_xxxx env variable to build OVA from this VMX."
+     else
+        echo "{INFO_HEADER} Build OVF is successful... Exit the HWIMO-BUILD Script. Use BUILD_STAGE=BUILD_FINAL and ANSIBLE_PLAYBOOK=rackhd_mini_xxxx env variable to build Box from this OVF."
+     fi
+     exit 0
+ fi
+
+if [ "$BUILD_TYPE"  == "virtualbox" ];  then
     echo "${INFO_HEADER} Skip the post-processing(signing/clamscan/ovf-template injection) for virtualbox for the time being ..."
+    mv packer_virtualbox-ovf_virtualbox.box ${VM_NAME}.box
+    echo "****************"
+    echo "Successfully create ${VM_NAME}.box"
+    echo "****************"
     exit 0
 fi
 
@@ -192,15 +276,16 @@ else
     echo "${INFO_HEADER}No signing to be performed.. skip."
 fi
 
-# Conver the VM Disk and VMX folder into an OVA
-
 BASENAME=${VM_NAME}
 OVA="${BASENAME}.ova"
-ovftool $SIGN_ARGS -o ${VMDIR}/${VM_NAME}.vmx $OVA
 
-if [ $? != 0 ]; then
-    echo "${ERROR_HEADER} ovftool exec failed.. exit"
-    exit 4
+# Conver the VM Disk and VMX folder into an OVA
+if [ "$BUILD_TYPE"  == "vmware" ];  then
+    ovftool $SIGN_ARGS -o ${VMDIR}/${VM_NAME}.vmx $OVA
+    if [ $? != 0 ]; then
+        echo "${ERROR_HEADER} ovftool exec failed.. exit"
+        exit 4
+    fi
 fi
 
 # Do Virus Scan
@@ -214,85 +299,14 @@ else
 fi
 
 
-#### BEGIN ###### Modify the OVF file and update checksum ##############
-#
-#Background:
-#   for the purpose of RackHD deployment enviroment without DHCP on admin port (e.x.: eth0),
-#   "OVF Environment" is leveraged to configure VM's IP during OVA/OVF deployment
-#
-#Implementation:
-#   1. define customized fields in OVF template file(XML format)
-#   2. when deploy RackHD OVA , you can specific the eth0 IP (thru OVF Env Parameter) like ```ovftool --prop:adminIP=1.2.3.4 .....```
-#   3. in VM OS's bootup scripts: use VMWare Tool to retrieve IP and set the primary NIC(eth0 for example)
-#
-#  Reference: http://www.v-front.de/2014/01/building-self-configuring-nested-esxi.html
-#
-###################################################################
-rm -f $"${BASENAME}.mf" # remove checksum file, otherwise, existing mf file will prevent ovftool coverting
-echo "covert to OVF"
-OVF=$"${BASENAME}.ovf"
-ovftool $OVA  $OVF
-echo "modify the OVF"
-
-#######################################################
-# Note : this is ESXi format. (other ESX version may varies )
-# Add ProductSection/Property xml nodes under VirtualSystem xml node( kind of declare OVF Enviromental Properties)
-#######################################################
-
-################
-#[ OVF Template Injection Step #1 ]
-# Below 'sed' will "insert" below XML tree at the end of <VirtualSystem> tag of the OVF template file.
-#     |-ProductSection
-#     |----Info
-#     |----Product
-#     |----Category
-#     |----Property #1
-#     |----Property #..
-#     |----Property #n
-#################
-sed -i 's/<\/VirtualSystem>/ \
-  <ProductSection>    \
-     <Info>Information about the installed software<\/Info> \
-     <Product>Rackhd<\/Product> \
-     <Category>adminnetwork<\/Category>  \
-     <Property ovf:key="adminIP" ovf:type="string" ovf:userConfigurable="true"> \
-        <Label>adminIP<\/Label> \
-     <\/Property> \
-     <Property ovf:key="adminGateway" ovf:type="string" ovf:userConfigurable="true"> \
-        <Label>adminGateway<\/Label> \
-     <\/Property> \
-     <Property ovf:key="adminNetmask" ovf:type="string" ovf:userConfigurable="true"> \
-        <Label>adminNetmask<\/Label> \
-     <\/Property> \
-     <Property ovf:key="adminDNS" ovf:type="string" ovf:userConfigurable="true"> \
-        <Label>adminDNS<\/Label> \
-     <\/Property>  \
-  <\/ProductSection> \
-<\/VirtualSystem>   \
-/'  $OVF
-################
-#[ OVF Template Injection Step #2 ]
-# specific the "OVF enviroment transport" method to VMWare Tools
-###############
-sed -i 's/<VirtualHardwareSection>/<VirtualHardwareSection ovf:transport="com.vmware.guestInfo" > /' $OVF
-
-
-
-echo "recovert back to OVA"
-###############
-#[ OVF Template Injection Step #3 ]
-# update checksum
-###############
-NewChk=$(sha1sum $OVF | awk '{print $1}')
-sed  -i -E  "s/SHA1\(.*ovf\)=.*$/SHA1\($OVF\)= $NewChk/g"  $"${BASENAME}.mf"
-##############
-#[ OVF Template Injection Step #4 ]
-# re-package into OVA
-##############
-rm $OVA
-ovftool $OVF $OVA
-### END ####### Modify the OVF file and update checksum ##############
-
+if [ "${CUSTOMIZED_PROPERTY_OVA}" == "true" ];
+then
+    bash add_IP_property_to_ova.sh ${OVA}
+    if [ $? != 0 ]; then
+         echo "${ERROR_HEADER} add_IP_property_to_ova.sh ${OVA} failed! Abort!"
+         exit 5
+    fi
+fi # End of [ "${CUSTOMIZED_PROPERTY_OVA}" == "true" ]
 
 
 # Create MD5 & Sha256 checksum file

@@ -10,9 +10,35 @@ import ConfigParser
 CONFIG = os.environ.get('FIT_CONFIG', None)
 if CONFIG:
     # Load FIT configuration (.json format)
-    with open(CONFIG) as config_file:
-        config_blob = json.load(config_file)
-        defaults = config_blob['cit-config']
+    import fit_common
+
+    defaults = fit_common.fitcfg()['cit-config']
+    defaults['RACKHD_HOST'] = fit_common.fitcfg()['rackhd_host']
+    defaults['RACKHD_PORT'] = fit_common.fitports()['http']
+    defaults['RACKHD_PORT_AUTH'] = fit_common.fitports()['https']
+    defaults['RACKHD_HTTPD_PORT'] = fit_common.fitports()['httpd']
+    defaults['RACKHD_SSH_PORT'] = fit_common.fitports()['ssh']
+    defaults['RACKHD_SSH_USER'] = fit_common.fitcreds()['rackhd_ssh'][0]['username']
+    defaults['RACKHD_SSH_PASSWORD'] = fit_common.fitcreds()['rackhd_ssh'][0]['password']
+    defaults['RACKHD_SMB_USER'] = fit_common.fitcreds()['rackhd_smb'][0]['username']
+    defaults['RACKHD_SMB_PASSWORD'] = fit_common.fitcreds()['rackhd_smb'][0]['password']
+    defaults['RACKHD_AMQP_URL'] = fit_common.fitrackhd()['amqp']
+
+    # map from original cit repo path name to httpProxies in rackhd configuration
+    mappings = {
+        'RACKHD_CENTOS_REPO_PATH': '/CentOS/6.5',
+        'RACKHD_ESXI_REPO_PATH': '/ESXi/6.0',
+        'RACKHD_UBUNTU_REPO_PATH': '/Ubuntu/14'
+    }
+    for cit_path, local_path in mappings.items():
+        server_path = None
+        for proxy in fit_common.fitrackhd()['httpProxies']:
+            if local_path == proxy['localPath']:
+                server_path = proxy['server']
+                break
+        if server_path:
+            defaults[cit_path] = server_path
+
 else:
     # Load CIT configuration (.ini format)
     CONFIG = 'config/config.ini'
@@ -68,11 +94,18 @@ def get_cred(service):
         return get_b64_cred(["BMC_USER", "BMC_PASS"])
     elif service == 'redfish':
         return get_b64_cred(["REDFISH_USER", "REDFISH_PASS"])
+    elif service == 'ucs':
+        return get_b64_cred(["UCS_USER", "UCS_PASS"])
     else:
         return None
 
 def get_bmc_cred():
     return get_cred('bmc')
+
+
+def get_ucs_cred():
+    return get_cred('ucs')
+
 
 # Initial cred file to log bmc password information if it doesn't exist
 if os.path.isfile(CRED_FILE) is False:
@@ -80,11 +113,15 @@ if os.path.isfile(CRED_FILE) is False:
     bmc_pass = getpass('BMC password: ')
     redfish_user = raw_input('Redfish username: ')
     redfish_pass = getpass('Redfish password: ')
+    ucs_user = raw_input('UCS username: ')
+    ucs_pass = getpass('UCS password: ')
     creds = {
-        "BMC_USER":bmc_user, 
-        "BMC_PASS":bmc_pass,
-        "REDFISH_USER":redfish_user, 
-        "REDFISH_PASS":redfish_pass
+        "BMC_USER": bmc_user,
+        "BMC_PASS": bmc_pass,
+        "REDFISH_USER": redfish_user,
+        "REDFISH_PASS": redfish_pass,
+        "UCS_USER": ucs_user,
+        "UCS_PASS": ucs_pass
     }
     set_b64_cred(creds)
     

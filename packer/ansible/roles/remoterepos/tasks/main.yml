@@ -17,8 +17,6 @@
   args:
     chdir: "{{ ansible_env.HOME }}/src/{{ item }}"
   with_items:
-    - on-core
-    - on-tasks
     - on-http
     - on-tftp
     - on-dhcp-proxy
@@ -26,7 +24,6 @@
     - on-syslog
     - on-wss
     - on-tools
-    - on-imagebuilder
 
 - name: Reset to the branch specified
   shell: git reset --hard {{ branch }}
@@ -34,8 +31,6 @@
   args:
     chdir: "{{ ansible_env.HOME }}/src/{{ item }}"
   with_items:
-    - on-core
-    - on-tasks
     - on-http
     - on-tftp
     - on-dhcp-proxy
@@ -61,11 +56,6 @@
 
 - name: Npm install apidoc
   shell: "npm install apidoc"
-  args:
-    chdir: "{{ ansible_env.HOME }}/src/on-http"
-
-- name: Render 1.1 API docs for local reference
-  shell: "npm run apidoc"
   args:
     chdir: "{{ ansible_env.HOME }}/src/on-http"
 

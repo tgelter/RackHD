@@ -169,6 +169,10 @@ def compose_config(use_sysargs=False):
             # stack overlay configuration
             apply_stack_config()
 
+            # apply any additional configurations specified on command line
+            if fitcfg()['cmd-args-list']['extra']:
+                cfg_obj.add_from_file_list(fitcfg()['cmd-args-list']['extra'].split(','))
+
             # add significant environment variables
             cfg_obj.add_from_dict({
                 'env': {
@@ -192,16 +196,17 @@ def apply_stack_config():
     stack = fitargs()['stack']
     if stack is not None:
         mkcfg().add_from_file('stack_config.json', stack)
-        if fitargs()['rackhd_host'] == 'localhost' and 'rackhd_host' in fitcfg():
-            fitargs()['rackhd_host'] = fitcfg()['rackhd_host']
-        if 'bmc' in fitcfg():
-            fitargs()['bmc'] = fitcfg()['bmc']
-        if 'hyper' in fitcfg():
-            fitargs()['hyper'] = fitcfg()['hyper']
-        if 'ucs_ip' in fitcfg():
-            fitargs()['ucs_ip'] = fitcfg()['ucs_ip']
-        if 'ucs_port' in fitcfg():
-            fitargs()['ucs_port'] = fitcfg()['ucs_port']
+
+    if mkcfg().config_exists('deploy_generated.json'):
+        mkcfg().add_from_file('deploy_generated.json')
+
+    if fitargs()['rackhd_host'] == 'localhost' and 'rackhd_host' in fitcfg():
+        fitargs()['rackhd_host'] = fitcfg()['rackhd_host']
+    if 'bmc' in fitcfg():
+        fitargs()['bmc'] = fitcfg()['bmc']
+    if 'hyper' in fitcfg():
+        fitargs()['hyper'] = fitcfg()['hyper']
+
 
 def add_globals():
     """
@@ -312,6 +317,8 @@ def mkargs(in_args=None):
                             help="test to execute, default: tests/")
     arg_parser.add_argument("-config", default="config",
                             help="config file location, default: config")
+    arg_parser.add_argument("-extra", default=None,
+                            help="comma separated list of extra config files (found in 'config' directory)")
     arg_parser.add_argument("-group", default="all",
                             help="test group to execute: 'smoke', 'regression', 'extended', default: 'all'")
     arg_parser.add_argument("-stack", default="vagrant",
@@ -329,6 +336,8 @@ def mkargs(in_args=None):
     arg_parser.add_argument("-sku", default="all",
                             help="node SKU name, example: Quanta-T41, default=all")
     group = arg_parser.add_mutually_exclusive_group(required=False)
+    group.add_argument("-nodeindex", default="all",
+                       help="node index, integer 0 or greater")
     group.add_argument("-obmmac", default="all",
                        help="node OBM MAC address, example:00:1e:67:b1:d5:64")
     group.add_argument("-nodeid", default="None",
@@ -466,19 +475,22 @@ def remote_shell(shell_cmd, expect_receive="", expect_send="", timeout=300,
         user = fitcreds()['rackhd_host'][0]['username']
     if not password:
         password = fitcreds()['rackhd_host'][0]['password']
+    port = fitports()['ssh']
 
     logfile_redirect = None
     if VERBOSITY >= 4:
         print "VM number: ", vmnum
+        print "remote_shell: User =", user
         print "remote_shell: Host =", address
+        print "remote_shell: Port =", port
         print "remote_shell: Command =", shell_cmd
 
     if VERBOSITY >= 9:
         print "remote_shell: STDOUT =\n"
         logfile_redirect = sys.stdout
 
-    # if localhost just run the command local
-    if fitargs()['rackhd_host'] == 'localhost':
+    # if localhost and not on a portfoward port just run the command local
+    if fitargs()['rackhd_host'] == 'localhost' and port == 22:
         (command_output, exitstatus) = \
             pexpect.run("sudo bash -c \"" + shell_cmd + "\"",
                         withexitstatus=1,
@@ -493,15 +505,15 @@ def remote_shell(shell_cmd, expect_receive="", expect_send="", timeout=300,
     shell_cmd.replace("'", "\\\'")
     if expect_receive == "" or expect_send == "":
         (command_output, exitstatus) = \
-            pexpect.run("ssh -q -o StrictHostKeyChecking=no -t " + user + "@" +
-                        address + " sudo bash -c \\\"" + shell_cmd + "\\\"",
+            pexpect.run("ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t " + user + "@" +
+                        address + " -p " + str(port) + " sudo bash -c \\\"" + shell_cmd + "\\\"",
                         withexitstatus=1,
                         events={"assword": password + "\n"},
                         timeout=timeout, logfile=logfile_redirect)
     else:
         (command_output, exitstatus) = \
-            pexpect.run("ssh -q -o StrictHostKeyChecking=no -t " + user + "@" +
-                        address + " sudo bash -c \\\"" + shell_cmd + "\\\"",
+            pexpect.run("ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t " + user + "@" +
+                        address + " -p " + str(port) + " sudo bash -c \\\"" + shell_cmd + "\\\"",
                         withexitstatus=1,
                         events={"assword": password + "\n",
                                 expect_receive: expect_send + "\n"},
@@ -523,15 +535,16 @@ def scp_file_to_host(src_file_name, vmnum=1):
 
     :param src_file_name: name of file to copy over. May include path
     :type src_file_name: basestring
-    :return: just name of file on target (no path)
+    :return: file path on target
     :rtype: basestring
     '''
     logfile_redirect = file('/dev/null', 'w')
     just_fname = os.path.basename(src_file_name)
+    port = fitports()['ssh']
     # if localhost just copy to home dir
-    if fitargs()['rackhd_host'] == 'localhost':
-        remote_shell('cp ' + src_file_name + ' ~/' + src_file_name)
-        return src_file_name
+    if fitargs()['rackhd_host'] == 'localhost' and port == 22:
+        remote_shell('cp ' + src_file_name + ' ~/' + just_fname)
+        return '~/' + just_fname
 
     if (vmnum == 1):
         rackhd_hostname = fitargs()['rackhd_host']
@@ -540,7 +553,8 @@ def scp_file_to_host(src_file_name, vmnum=1):
 
     scp_target = fitcreds()['rackhd_host'][0]['username'] + '@{0}:'.format(rackhd_hostname)
 
-    cmd = 'scp -o StrictHostKeyChecking=no {0} {1}'.format(src_file_name, scp_target)
+    cmd = 'scp -P {0} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {1} {2}'.format(
+        port, src_file_name, scp_target)
     if VERBOSITY >= 4:
         print "scp_file_to_host: '{0}'".format(cmd)
 
@@ -556,7 +570,7 @@ def scp_file_to_host(src_file_name, vmnum=1):
 
     assert ecode == 0, \
         'failed "{0}" because {1}. Output={2}'.format(cmd, ecode, command_output)
-    return just_fname
+    return '~/' + just_fname
 
 
 def get_auth_token():
@@ -813,26 +827,32 @@ def power_control_all_nodes(state):
 
 
 def mongo_reset():
-    # clears the Mongo database on host to default, returns 0 if successful
-    remote_shell('service onrack-conductor stop')
-    remote_shell('/opt/onrack/bin/monorail stop')
-    remote_shell("mongo pxe --eval 'db.dropDatabase\\\(\\\)'")
-    remote_shell('rm -f /var/lib/dhcp/dhcpd.leases')
-    remote_shell('rm -f /var/log/onrack-conductor-event.log')
-    remote_shell('/opt/onrack/bin/monorail start')
-    if remote_shell('service onrack-conductor start')['exitcode'] > 0:
-        return 1
-    return 0
+    # clears the Mongo database on host to default, returns True if successful
+    exitcode = 0
+    if int(remote_shell('pm2 stop rackhd-pm2-config.yml')['exitcode']) == 0:  # for pm2-based source installations
+        exitcode = exitcode + int(remote_shell("mongo pxe --eval 'db.dropDatabase\\\(\\\)'")['exitcode'])
+        exitcode = exitcode + int(remote_shell('rm -f /var/lib/dhcp/dhcpd.leases')['exitcode'])
+        exitcode = exitcode + int(remote_shell('pm2 start rackhd-pm2-config.yml')['exitcode'])
+    else:  # for package-based installations
+        exitcode = exitcode + int(remote_shell('sudo service on-http stop')['exitcode'])
+        exitcode = exitcode + int(remote_shell('sudo service on-dhcp-proxy stop')['exitcode'])
+        exitcode = exitcode + int(remote_shell('sudo service on-syslog stop')['exitcode'])
+        exitcode = exitcode + int(remote_shell('sudo service on-taskgraph stop')['exitcode'])
+        exitcode = exitcode + int(remote_shell('sudo service on-tftp stop')['exitcode'])
+        exitcode = exitcode + int(remote_shell("mongo pxe --eval 'db.dropDatabase\\\(\\\)'")['exitcode'])
+        exitcode = exitcode + int(remote_shell('rm -f /var/lib/dhcp/dhcpd.leases')['exitcode'])
+        exitcode = exitcode + int(remote_shell('sudo service on-http start')['exitcode'])
+        exitcode = exitcode + int(remote_shell('sudo service on-dhcp-proxy start')['exitcode'])
+        exitcode = exitcode + int(remote_shell('sudo service on-syslog start')['exitcode'])
+        exitcode = exitcode + int(remote_shell('sudo service on-taskgraph start')['exitcode'])
+        exitcode = exitcode + int(remote_shell('sudo service on-tftp start')['exitcode'])
+    if exitcode == 0:
+        return True
+    else:
+        return False
 
 
-def appliance_reset():
-
-    return_code = subprocess.call("ipmitool -I lanplus -H " + fitargs()["bmc"] +
-                                  " -U root -P 1234567 chassis power reset", shell=True)
-    return return_code
-
-
-def node_select():
+def node_select(no_unknown_nodes=False):
 
     # returns a list with valid compute node IDs that match fitargs()["sku"] in 'Name' or 'Model' field
     # and matches node BMC MAC address in fitargs()["obmmac"] if specified
@@ -854,8 +874,8 @@ def node_select():
             if str(fitargs()['sku']) in json.dumps(skuentry):
                 skuid = skuentry['id']
         # Collect node IDs
-        catalog = rackhdapi('/api/2.0/nodes')
-        if skumap['status'] != 200:
+        catalog = rackhdapi('/api/2.0/nodes?type=compute')
+        if catalog['status'] != 200:
             print '**** Unable to retrieve node list via API.\n'
             sys.exit(255)
         # Select node by SKU
@@ -863,7 +883,10 @@ def node_select():
             if fitargs()["sku"] == 'all':
                 # Select only managed compute nodes
                 if nodeentry['type'] == 'compute':
-                    nodelist.append(nodeentry['id'])
+                    if nodeentry.get('sku') is None and no_unknown_nodes is True:
+                        continue
+                    else:
+                        nodelist.append(nodeentry['id'])
             else:
                 if 'sku' in nodeentry and skuid in json.dumps(nodeentry['sku']):
                     nodelist.append(nodeentry['id'])
@@ -876,12 +899,35 @@ def node_select():
                 if fitargs()["obmmac"] in json.dumps(nodeentry['json']):
                     nodelist = [member]
                     break
+        # select node by index number
+        if fitargs()["nodeindex"] != 'all':
+            idlist = sorted(nodelist)
+            nodelist = []
+            try:
+                idlist[int(fitargs()["nodeindex"])]
+            except:
+                print '**** Invalid node index ' + fitargs()["nodeindex"] + '.\n'
+                sys.exit(255)
+            else:
+                nodelist.append(idlist[int(fitargs()["nodeindex"])])
     if VERBOSITY >= 6:
         print "Node List:"
         print nodelist, '\n'
     if len(nodelist) == 0:
         print '**** Empty node list.\n'
     return nodelist
+
+
+def is_dell_node(node_id):
+    node_entry = rackhdapi('/api/2.0/nodes/{0}'.format(node_id))
+    if node_entry['status'] != 200:
+        print '**** Unable to retrieve node list via API.\n'
+        sys.exit(255)
+
+    for identifier in node_entry['json']['identifiers']:
+        if re.match('^[0-9|A-Z]{7}$', identifier) is not None:
+            return True
+    return False
 
 
 def list_skus():
@@ -1051,136 +1097,6 @@ def apply_obm_settings(retry=30):
     return False
 
 
-def apply_obm_settings_seq():
-    # legacy routine to install OBM credentials via workflows sequentially one-at-a-time
-    count = 0
-    for creds in fitcreds()['bmc']:
-        # greate graph for setting OBM credentials
-        payload = {
-            "friendlyName": "IPMI" + str(count),
-            "injectableName": 'Graph.Obm.Ipmi.CreateSettings' + str(count),
-            "options": {
-                "obm-ipmi-task": {
-                    "user": creds["username"],
-                    "password": creds["password"]
-                }
-            },
-            "tasks": [
-                {
-                    "label": "obm-ipmi-task",
-                    "taskName": "Task.Obm.Ipmi.CreateSettings"
-                }
-            ]
-        }
-        api_data = rackhdapi("/api/2.0/workflows/graphs", action="put", payload=payload)
-        if api_data['status'] != 201:
-            print "**** OBM workflow failed to load!"
-            return False
-        count += 1
-    # Setup additional OBM settings for nodes that currently use RMM port (still same bmc username/password used)
-    count = 0
-    for creds in fitcreds()['bmc']:
-        # greate graph for setting OBM credentials for RMM
-        payload = {
-            "friendlyName": "RMM.IPMI" + str(count),
-            "injectableName": 'Graph.Obm.Ipmi.CreateSettings.RMM' + str(count),
-            "options": {
-                "obm-ipmi-task": {
-                    "ipmichannel": "3",
-                    "user": creds["username"],
-                    "password": creds["password"]
-                }
-            },
-            "tasks": [
-                {
-                    "label": "obm-ipmi-task",
-                    "taskName": "Task.Obm.Ipmi.CreateSettings"
-                }
-            ]
-        }
-        api_data = rackhdapi("/api/2.0/workflows/graphs", action="put", payload=payload)
-        if api_data['status'] != 201:
-            print "**** OBM workflow failed to load!"
-            return False
-        count += 1
-
-    # run each OBM workflow against each node until success
-    nodelist = node_select()
-    failedlist = []
-    for node in nodelist:
-        for num in range(0, count):
-            nodestatus = ""
-            wfstatus = ""
-            skuid = rackhdapi('/api/2.0/nodes/' + node)['json'].get("sku")
-            # Check is sku is empty
-            sku = skuid.rstrip("/api/2.0/skus/")
-            if sku:
-                skudata = rackhdapi(skuid)['text']
-                if "rmm.data.MAC" in skudata:
-                    workflow = {"name": 'Graph.Obm.Ipmi.CreateSettings.RMM' + str(num)}
-                else:
-                    workflow = {"name": 'Graph.Obm.Ipmi.CreateSettings' + str(num)}
-            else:
-                print "*** SKU not set for node ", node
-                nodestatus = "failed"
-                break
-
-            # wait for existing workflow to complete
-            for dummy in range(0, 60):
-                print "*** Using workflow: ", workflow
-                result = rackhdapi("/api/2.0/nodes/" + node + "/workflows", action="post", payload=workflow)
-                if result['status'] != 201:
-                    time.sleep(5)
-                elif dummy == 60:
-                    print "*** Workflow failed to start"
-                    wfstatus = "failed"
-                else:
-                    break
-
-            if wfstatus != "failed":
-                # wait for OBM workflow to complete
-                counter = 0
-                for counter in range(0, 60):
-                    time.sleep(10)
-                    state_data = rackhdapi("/api/2.0/workflows/" + result['json']["instanceId"])
-                    if state_data['status'] == 200:
-                        if "_status" in state_data['json']:
-                            nodestatus = state_data['json']['_status']
-                        else:
-                            nodestatus = state_data['json']['status']
-                        if nodestatus != "running" and nodestatus != "pending":
-                            break
-                if nodestatus == "succeeded":
-                    print "*** Succeeded on workflow ", workflow
-                    break
-                if counter == 60:
-                    # print "Timed out status", nodestatus
-                    nodestatus = "failed"
-                    print "*** Node failed OBM settings - timeout:", node
-                    print "*** Failed on workflow ", workflow
-
-        # check final loop status for node workflow
-        if wfstatus == "failed" or nodestatus == "failed":
-            failedlist.append(node)
-
-    # cleanup failed nodes OBM settings on nodes, need to remove failed settings
-    for node in failedlist:
-        result = rackhdapi("/api/2.0/nodes/" + node)
-        if result['status'] == 200:
-            if result['json']['obms']:
-                obms = result['json']['obms'][0]
-                obmref = obms.get('ref')
-                if obmref:
-                    result = rackhdapi(obmref, action="delete")
-                    if result['status'] != 204:
-                        print "*** Warning: failed to delete invalid OBM setting ", obmref
-
-    if len(failedlist) > 0:
-        print "**** Nodes failed OBM settings:", failedlist
-        return False
-    return True
-
-
 def run_nose(nosepath=None):
 
     if not nosepath:
@@ -1205,7 +1121,12 @@ def run_nose(nosepath=None):
 
     exitcode = 0
     # set nose options
-    noseopts = ['--exe', '--with-nosedep', '--with-stream-monitor']
+    noseopts = ['--exe', '--with-nosedep', '--with-stream-monitor',
+                '--sm-amqp-url', 'generate:{}'.format(fitports()['amqp_ssl']),
+                '--sm-dut-ssh-user', fitcreds()['rackhd_host'][0]['username'],
+                '--sm-dut-ssh-password', fitcreds()['rackhd_host'][0]['password'],
+                '--sm-dut-ssh-port', str(fitports()['ssh']),
+                '--sm-dut-ssh-host', fitargs()['rackhd_host']]
     if fitargs()['group'] != 'all' and fitargs()['group'] != '':
         noseopts.append('-a')
         noseopts.append(str(fitargs()['group']))
@@ -1223,7 +1144,7 @@ def run_nose(nosepath=None):
     # if nosepath is a directory, recurse through subdirs else run single test file
     if os.path.isdir(nosepath):
         # Skip the CIT test directories that match these expressions
-        regex = '(tests/*$)|(tests/api-cit/*)|(tests/api$)|(tests/api/.*)'
+        regex = '(tests/*$)|(tests/api$)|(tests/api/.*)'
         pathspecs = []
         for root, _, _ in os.walk(nosepath):
             if not re.search(regex, root):

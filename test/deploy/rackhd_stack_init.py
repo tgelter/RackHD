@@ -1,5 +1,5 @@
 '''
-Copyright 2016, EMC, Inc.
+Copyright (c) 2016-2017 Dell Inc. or its subsidiaries. All Rights Reserved.
 
 Author(s):
 George Paulos
@@ -25,6 +25,8 @@ import unittest
 import fit_common
 import pdu_lib
 import flogging
+import test_api_utils
+
 log = flogging.get_loggers()
 
 # Locals
@@ -33,16 +35,28 @@ MAX_CYCLES = 60
 
 class rackhd_stack_init(unittest.TestCase):
     def test01_set_auth_user(self):
-        fit_common.remote_shell('rm auth.json')
         auth_json = open('auth.json', 'w')
         auth_json.write('{"username":"' + fit_common.fitcreds()["api"][0]["admin_user"] + '", "password":"' +
                         fit_common.fitcreds()["api"][0]["admin_pass"] + '", "role":"Administrator"}')
         auth_json.close()
-        fit_common.scp_file_to_ora('auth.json')
-        rc = fit_common.remote_shell("curl -ks -X POST -H 'Content-Type:application/json' https://localhost:" +
-                                     str(fit_common.fitports()['https']) + "/api/2.0/users -d @auth.json")
-        if rc['exitcode'] != 0:
-            log.info_5("ALERT: Auth admin user not set! Please manually set the admin user account if required.")
+        try:
+            # add first user to remote rackhd directly
+            return_code = ""
+            rackhd_hostname = fit_common.fitargs()['rackhd_host']
+            set_auth_url = "https://" + rackhd_hostname + ":" + str(fit_common.fitports()['https']) + "/api/2.0/users"
+            rc = fit_common.restful(url_command=set_auth_url, rest_action="post", rest_payload=json.load(open('auth.json')))
+            return_code = str(rc['status'])
+        except Exception as e:
+            log.info_5("ALERT: RackHD is not in localhost, will set first user through ssh{0}".format(e))
+        if return_code != '201':
+            log.info_5("ALERT: Can't set first user to RackHD https port directly, will set it through ssh")
+            # ssh login to rackhd and add first user to localhost rackhd
+            fit_common.remote_shell('rm auth.json')
+            fit_common.scp_file_to_ora('auth.json')
+            rc = fit_common.remote_shell("curl -ks -X POST -H 'Content-Type:application/json' https://localhost:" +
+                                         str(fit_common.fitports()['https']) + "/api/2.0/users -d @auth.json")
+            if rc['exitcode'] != 0:
+                log.info_5("ALERT: Auth admin user not set! Please manually set the admin user account if required.")
 
     def test02_preload_sku_packs(self):
         log.info_5("**** Downloading SKU packs from GitHub")
@@ -122,7 +136,7 @@ class rackhd_stack_init(unittest.TestCase):
         log.info_5("**** Creating control switch node.")
         payload = {"type": "switch",
                    "name": "Control",
-                   "autoDiscover": "true",
+                   "autoDiscover": True,
                    "obms": [{"service": "snmp",
                              "config": {"host": fit_common.fitcfg()['control'],
                                         "community": fit_common.fitcreds()['snmp'][0]['community']}}]}
@@ -136,7 +150,7 @@ class rackhd_stack_init(unittest.TestCase):
         log.info_5("**** Creating data switch node.")
         payload = {"type": "switch",
                    "name": "Data",
-                   "autoDiscover": "true",
+                   "autoDiscover": True,
                    "obms": [{"service": "snmp",
                              "config": {"host": fit_common.fitcfg()['data'],
                                         "community": fit_common.fitcreds()['snmp'][0]['community']}}]}
@@ -150,7 +164,7 @@ class rackhd_stack_init(unittest.TestCase):
         log.info_5("**** Creating PDU node.")
         payload = {"type": "pdu",
                    "name": "PDU",
-                   "autoDiscover": "true",
+                   "autoDiscover": True,
                    "obms": [{"service": "snmp",
                              "config": {"host": fit_common.fitcfg()['pdu'],
                                         "community": fit_common.fitcreds()['snmp'][0]['community']}}]}
@@ -202,10 +216,6 @@ class rackhd_stack_init(unittest.TestCase):
                 time.sleep(10)
         return False
 
-    def test10_apply_obm_settings(self):
-        log.info_5("**** Apply OBM setting to compute nodes.")
-        self.assertTrue(fit_common.apply_obm_settings(), "OBM settings failed.")
-
     @unittest.skipUnless("bmc" in fit_common.fitcfg(), "")
     @unittest.skip("Skipping 'test10_add_management_server' bug RAC-4063")
     def test11_add_management_server(self):
@@ -223,7 +233,7 @@ class rackhd_stack_init(unittest.TestCase):
         if usr != "" and pwd != "":
             payload = {"name": "Management Server " + str(time.time()),
                        "type": "mgmt",
-                       "autoDiscover": "true",
+                       "autoDiscover": True,
                        "obms": [{"service": "ipmi-obm-service",
                                  "config": {"host": fit_common.fitcfg()['bmc'],
                                             "user": usr,
@@ -290,6 +300,90 @@ class rackhd_stack_init(unittest.TestCase):
         if poller_list != []:
             log.error("Poller IDs with error or no data: {}".format(json.dumps(poller_list, indent=4)))
         return False
+
+    def test99_display_node_list_discovery_data(self):
+        # This test displays a list of the nodes along with
+        # the associated BMC, RMM, and OBM settings for the discovered compute nodes
+        fit_common.VERBOSITY = 1  # this is needed for suppressing debug messages to make reports readable
+        mondata = fit_common.rackhdapi("/api/2.0/nodes")
+        nodes = mondata['json']
+        result = mondata['status']
+
+        if result == 200:
+            log.info_1(" NODE INVENTORY")
+            log.info_1(" Number of nodes found: %s", str(len(nodes)))
+            i = 0
+            for node in nodes:
+                i += 1
+                nn = node["id"]
+                log.info_1(" ************************")
+                log.info_1(" Node %s: %s", str(i), nn)
+                # Check type of node and display info
+                nodetype = node['type']
+                if nodetype != "compute":
+                    log.info_1(" Node Type: %s ", nodetype)
+                    if nodetype == "enclosure":
+                        log.info_1(" Node Name: %s", node['name'])
+                        nodelist = test_api_utils.get_relations_for_node(nn)
+                        if nodelist:
+                            log.info_1(" Nodes contained in this enclosure: %s", nodelist)
+                        else:
+                            log.info_1(" No Nodes found in this enclosure")
+                else:
+                    # If compute node, display BMC, RMM and IP info
+                    nodetype = test_api_utils.get_rackhd_nodetype(nn)
+                    log.info_1(" Compute Node Type: %s", nodetype)
+                    enclosure = test_api_utils.get_relations_for_node(nn)
+                    if enclosure:
+                        log.info_1(" In Enclosure: %s ", enclosure[0])
+                    else:
+                        log.info_1(" Not associated with a monorail enclosure")
+                    # try to get the BMC info from the catalog
+                    monurl = "/api/2.0/nodes/" + nn + "/catalogs/bmc"
+                    mondata = fit_common.rackhdapi(monurl, action="get")
+                    catalog = mondata['json']
+                    bmcresult = mondata['status']
+                    if bmcresult != 200:
+                        log.info_1(" Error on catalog/bmc command")
+                    else:
+                        log.info_1(" BMC Mac: %s", catalog["data"]["MAC Address"])
+                        log.info_1(" BMC IP Addr: %s", catalog["data"]["IP Address"])
+                        log.info_1(" BMC IP Addr Src: %s", catalog["data"]["IP Address Source"])
+                    # Get RMM info from the catalog, if present
+                    rmmurl = "/api/2.0/nodes/" + nn + "/catalogs/rmm"
+                    rmmdata = fit_common.rackhdapi(rmmurl, action="get")
+                    rmmcatalog = rmmdata['json']
+                    rmmresult = rmmdata['status']
+                    if rmmresult != 200:
+                        log.info_1(" No RMM catalog entry.")
+                    else:
+                        log.info_1(" RMM Mac: %s", rmmcatalog["data"].get("MAC Address", " "))
+                        log.info_1(" RMM IP: %s", rmmcatalog["data"].get("IP Address", " "))
+                        log.info_1(" RMM IP Addr source: %s", rmmcatalog["data"].get("IP Address Source", " "))
+
+                    nodeurl = "/api/2.0/nodes/" + nn
+                    nodedata = fit_common.rackhdapi(nodeurl, action="get")
+                    nodeinfo = nodedata['json']
+                    result = nodedata['status']
+                    if result != 200:
+                        log.info_1(" Error on node commandi %s http response %s", nodeurl, result)
+                    else:
+                        # Check BMC IP vs OBM IP setting
+                        try:
+                            obmlist = nodeinfo["obms"]
+                        except:
+                            log.info_1(" ERROR: Node has no OBM settings configured")
+                        else:
+                            try:
+                                obmurl = obmlist[0]['ref']
+                                obmdata = fit_common.rackhdapi(obmurl, action="get")
+                            except:
+                                log.info_1("   Invalid or empty OBM settings on Node")
+                            else:
+                                log.info_1(" obmhost: %s", obmdata['json']["config"].get("host", "Error: No Host in obmdata"))
+                                log.info_1(" obmuser: %s", obmdata['json']["config"].get("user", "Error: No User defined!"))
+        else:
+            log.info_1("Cannot get RackHD nodes from stack, http response code: %s", result)
 
 
 if __name__ == '__main__':

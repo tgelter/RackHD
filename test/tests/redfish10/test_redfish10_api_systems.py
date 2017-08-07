@@ -11,6 +11,8 @@ import os
 import sys
 import subprocess
 import fit_common
+import flogging
+log = flogging.get_loggers()
 
 
 # Local methods
@@ -144,10 +146,28 @@ class redfish10_api_systems(fit_common.unittest.TestCase):
                     self.assertNotEqual(item, "", 'Empty JSON Field')
 
     def test_redfish_v1_systems_id_ethernetinterfaces(self):
-        # Not yet implemented
+        # Will produce a list of available Ethernet interfaces
         for nodeid in NODECATALOG:
             api_data = fit_common.rackhdapi('/redfish/v1/Systems/' + nodeid + '/EthernetInterfaces')
-            self.assertIn(api_data['status'], [200, 501], 'Incorrect HTTP return code, expected 200, got:' + str(api_data['status']))
+            self.assertIn(api_data['status'], [200], 'Expected 200, got:' + str(api_data['status']))
+
+    def test_redfish_v1_systems_id_bios(self):
+        # Only works for Dell servers with microservices
+        for nodeid in NODECATALOG:
+            api_data = fit_common.rackhdapi('/redfish/v1/Systems/' + nodeid + '/Bios')
+            if fit_common.is_dell_node(nodeid):
+                self.assertIn(api_data['status'], [200], 'Expected 200, got:' + str(api_data['status']))
+            else:
+                self.assertIn(api_data['status'], [404], 'Expected 404, got:' + str(api_data['status']))
+
+    def test_redfish_v1_systems_id_bios_settings(self):
+        # Only works for Dell servers with microservices
+        for nodeid in NODECATALOG:
+            api_data = fit_common.rackhdapi('/redfish/v1/Systems/' + nodeid + '/Bios/Settings')
+            if fit_common.is_dell_node(nodeid):
+                self.assertIn(api_data['status'], [200], 'Expected 200, got:' + str(api_data['status']))
+            else:
+                self.assertIn(api_data['status'], [404], 'Expected 404, got:' + str(api_data['status']))
 
     def test_redfish_v1_systems_id_simplestorage(self):
         # iterate through node IDs
@@ -203,7 +223,11 @@ class redfish10_api_systems(fit_common.unittest.TestCase):
                     self.assertIn(item, nodeid, item + ' field not present')
                     if fit_common.VERBOSITY >= 3:
                         print ("\t {0}".format(nodeid[item]))
-                    self.assertGreater(len(nodeid[item]), 0, item + ' field empty')
+                    if len(nodeid[item]) == 0 and item == 'Message':
+                        log.info_5("Message field empty for SEL SensorType:" + nodeid['SensorType'] +
+                                   " SensorNumber:" + str(nodeid['SensorNumber']))
+                    else:
+                        self.assertGreater(len(nodeid[item]), 0, item + ' field empty')
                 for link in [ 'OriginOfCondition' ]:
 
                     if fit_common.VERBOSITY >= 2:
@@ -241,7 +265,11 @@ class redfish10_api_systems(fit_common.unittest.TestCase):
                     self.assertIn(item, seldata['json'], item + ' field not present')
                     if fit_common.VERBOSITY >= 3:
                         print ("\t {0}".format(seldata['json'][item]))
-                    self.assertGreater(len(seldata['json'][item]), 0, item + ' field empty')
+                    if len(seldata['json'][item]) == 0 and item == 'Message':
+                        log.info_5("Message field empty for SEL SensorType:" + seldata['json']['SensorType'] +
+                                   " SensorNumber:" + str(seldata['json']['SensorNumber']))
+                    else:
+                        self.assertGreater(len(seldata['json'][item]), 0, item + ' field empty')
 
                 for link in [ 'OriginOfCondition' ]:
                     if fit_common.VERBOSITY >= 2:
@@ -249,6 +277,18 @@ class redfish10_api_systems(fit_common.unittest.TestCase):
                     self.assertIn('OriginOfCondition', seldata['json']['Links'], 'OriginOfCondition' + ' field not present')
                     if fit_common.VERBOSITY >= 3:
                         print ("\t {0}".format(seldata['json']['Links']['OriginOfCondition']))
+
+    def test_redfish_v1_systems_id_secureboot(self):
+        # Currently relies on Dell/Racadm, so just test for exceptions
+        for nodeid in NODECATALOG:
+            api_data = fit_common.rackhdapi('/redfish/v1/Systems/' + nodeid + '/SecureBoot')
+            self.assertEqual(api_data['status'], 500, 'Incorrect HTTP return code, expected 500, got:' + str(api_data['status']))
+            api_data = fit_common.rackhdapi('/redfish/v1/Systems/' + nodeid + '/SecureBoot', action='post',
+                                            payload={"zzzSecureBootEnable": True})
+            self.assertEqual(api_data['status'], 400, 'Incorrect HTTP return code, expected 400, got:' + str(api_data['status']))
+            api_data = fit_common.rackhdapi('/redfish/v1/Systems/' + nodeid + '/SecureBoot', action='post',
+                                            payload={"SecureBootEnable": True})
+            self.assertEqual(api_data['status'], 500, 'Incorrect HTTP return code, expected 500, got:' + str(api_data['status']))
 
 if __name__ == '__main__':
     fit_common.unittest.main()
