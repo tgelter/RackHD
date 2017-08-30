@@ -192,7 +192,7 @@ class redfish10_api_systems(fit_common.unittest.TestCase):
     def test_redfish_v1_systems_id_logservices_sel(self):
         # iterate through node IDs
         for nodeid in NODECATALOG:
-            api_data = fit_common.rackhdapi("/redfish/v1/Systems/" + nodeid + "/LogServices/sel")
+            api_data = fit_common.rackhdapi("/redfish/v1/Systems/" + nodeid + "/LogServices/SEL")
             if fit_common.VERBOSITY >= 2:
                 print ("nodeid: {0}".format(nodeid))
             self.assertEqual(api_data['status'], 200, 'Incorrect HTTP return code, expected 200, got:' + str(api_data['status']))
@@ -206,7 +206,7 @@ class redfish10_api_systems(fit_common.unittest.TestCase):
     def test_redfish_v1_systems_id_logservices_sel_entries(self):
         # iterate through node IDs
         for nodeid in NODECATALOG:
-            api_data = fit_common.rackhdapi("/redfish/v1/Systems/" + nodeid + "/LogServices/sel/Entries")
+            api_data = fit_common.rackhdapi("/redfish/v1/Systems/" + nodeid + "/LogServices/SEL/Entries")
             if fit_common.VERBOSITY >= 2:
                 print ("nodeid: {0}".format(nodeid))
             self.assertEqual(api_data['status'], 200, 'Incorrect HTTP return code, expected 200, got:' + str(api_data['status']))
@@ -226,6 +226,9 @@ class redfish10_api_systems(fit_common.unittest.TestCase):
                     if len(nodeid[item]) == 0 and item == 'Message':
                         log.info_5("Message field empty for SEL SensorType:" + nodeid['SensorType'] +
                                    " SensorNumber:" + str(nodeid['SensorNumber']))
+                    elif len(nodeid[item]) == 0 and item == 'Created':
+                        log.info_5("Created field empty for SEL SensorType:" + nodeid['SensorType'] +
+                                   " SensorNumber:" + str(nodeid['SensorNumber']))
                     else:
                         self.assertGreater(len(nodeid[item]), 0, item + ' field empty')
                 for link in [ 'OriginOfCondition' ]:
@@ -239,7 +242,7 @@ class redfish10_api_systems(fit_common.unittest.TestCase):
     def test_redfish_v1_systems_id_logservices_sel_entries_id(self):
         # iterate through node IDs
         for nodeid in NODECATALOG:
-            api_data = fit_common.rackhdapi("/redfish/v1/Systems/" + nodeid + "/LogServices/sel/Entries")
+            api_data = fit_common.rackhdapi("/redfish/v1/Systems/" + nodeid + "/LogServices/SEL/Entries")
             if fit_common.VERBOSITY >= 2:
                 print ("nodeid: {0}".format(nodeid))
             self.assertEqual(api_data['status'], 200, 'Incorrect HTTP return code, expected 200, got:' + str(api_data['status']))
@@ -256,20 +259,27 @@ class redfish10_api_systems(fit_common.unittest.TestCase):
                     print ("SEL Entry: {0}".format(selid))
 
                 #retrieve the data for the specific SEL entry and iterate through individual fields
-                seldata = fit_common.rackhdapi("/redfish/v1/Systems/" + nodeid + "/LogServices/sel/Entries/" + selid)
+                seldata = fit_common.rackhdapi("/redfish/v1/Systems/" + nodeid + "/LogServices/SEL/Entries/" + selid)
                 self.assertEqual(seldata['status'], 200, 'Incorrect HTTP return code, expected 200, got:' + str(seldata['status']))
 
                 for item in [ 'Id', 'Created', 'EntryCode', 'EntryType', 'SensorType', 'Name', 'Message' ]:
                     if fit_common.VERBOSITY >= 2:
                         print ("Checking: {0}".format(item))
-                    self.assertIn(item, seldata['json'], item + ' field not present')
-                    if fit_common.VERBOSITY >= 3:
-                        print ("\t {0}".format(seldata['json'][item]))
-                    if len(seldata['json'][item]) == 0 and item == 'Message':
-                        log.info_5("Message field empty for SEL SensorType:" + seldata['json']['SensorType'] +
+                    if item == 'Created' and item not in seldata['json']:
+                        log.info_5("Created field does not exist for SEL Sensor Type:" + seldata['json']['SensorType'] +
                                    " SensorNumber:" + str(seldata['json']['SensorNumber']))
                     else:
-                        self.assertGreater(len(seldata['json'][item]), 0, item + ' field empty')
+                        self.assertIn(item, seldata['json'], item + ' field not present')
+                        if fit_common.VERBOSITY >= 3:
+                            print("\t {0}".format(seldata['json'][item]))
+                        if len(seldata['json'][item]) == 0 and item == 'Message':
+                            log.info_5("Message field empty for SEL SensorType:" + seldata['json']['SensorType'] +
+                                       " SensorNumber:" + str(seldata['json']['SensorNumber']))
+                        elif len(seldata['json'][item]) == 0 and item == 'Created':
+                            log.info_5("Created field empty for SEL SensorType:" + seldata['json']['SensorType'] +
+                                       " SensorNumber:" + str(seldata['json']['SensorNumber']))
+                        else:
+                            self.assertGreater(len(seldata['json'][item]), 0, item + ' field empty')
 
                 for link in [ 'OriginOfCondition' ]:
                     if fit_common.VERBOSITY >= 2:
