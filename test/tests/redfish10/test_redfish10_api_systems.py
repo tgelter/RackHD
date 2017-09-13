@@ -231,13 +231,6 @@ class redfish10_api_systems(fit_common.unittest.TestCase):
                                    " SensorNumber:" + str(nodeid['SensorNumber']))
                     else:
                         self.assertGreater(len(nodeid[item]), 0, item + ' field empty')
-                for link in [ 'OriginOfCondition' ]:
-
-                    if fit_common.VERBOSITY >= 2:
-                        print ("Checking: {0}".format(link))
-                    self.assertIn('OriginOfCondition', nodeid['Links'], 'OriginOfCondition' + ' field not present')
-                    if fit_common.VERBOSITY >= 3:
-                        print ("\t {0} ".format(nodeid['Links']['OriginOfCondition']))
 
     def test_redfish_v1_systems_id_logservices_sel_entries_id(self):
         # iterate through node IDs
@@ -281,24 +274,17 @@ class redfish10_api_systems(fit_common.unittest.TestCase):
                         else:
                             self.assertGreater(len(seldata['json'][item]), 0, item + ' field empty')
 
-                for link in [ 'OriginOfCondition' ]:
-                    if fit_common.VERBOSITY >= 2:
-                        print ("Checking: {0}".format(link))
-                    self.assertIn('OriginOfCondition', seldata['json']['Links'], 'OriginOfCondition' + ' field not present')
-                    if fit_common.VERBOSITY >= 3:
-                        print ("\t {0}".format(seldata['json']['Links']['OriginOfCondition']))
-
     def test_redfish_v1_systems_id_secureboot(self):
         # Currently relies on Dell/Racadm, so just test for exceptions
         for nodeid in NODECATALOG:
             api_data = fit_common.rackhdapi('/redfish/v1/Systems/' + nodeid + '/SecureBoot')
-            self.assertEqual(api_data['status'], 500, 'Incorrect HTTP return code, expected 500, got:' + str(api_data['status']))
+            self.assertIn(api_data['status'], [500, 501], 'HTTP status expected 500,501 got:' + str(api_data['status']))
             api_data = fit_common.rackhdapi('/redfish/v1/Systems/' + nodeid + '/SecureBoot', action='post',
                                             payload={"zzzSecureBootEnable": True})
-            self.assertEqual(api_data['status'], 400, 'Incorrect HTTP return code, expected 400, got:' + str(api_data['status']))
+            self.assertEqual(api_data['status'], 400, 'Incorrect HTTP status, expected 400, got:' + str(api_data['status']))
             api_data = fit_common.rackhdapi('/redfish/v1/Systems/' + nodeid + '/SecureBoot', action='post',
                                             payload={"SecureBootEnable": True})
-            self.assertEqual(api_data['status'], 500, 'Incorrect HTTP return code, expected 500, got:' + str(api_data['status']))
+            self.assertIn(api_data['status'], [500, 501], 'HTTP status expected 500,501 got:' + str(api_data['status']))
 
 if __name__ == '__main__':
     fit_common.unittest.main()
